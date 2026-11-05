@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeading } from "@/components/page-heading";
 import { useStore } from "@/components/store-provider";
@@ -15,12 +15,33 @@ type CreatedOrder = {
   order: { id: string; amount: number; currency: string };
 };
 
+type ShippingAddress = {
+  fullName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+};
+
 export default function CartPage() {
   const { ready, user } = useProtectedRoute("buyer");
   const { cart, cartLoading, incrementCartItem, removeCartItem, notify, refreshCart } = useStore();
   const [busyItem, setBusyItem] = useState("");
   const [checkoutBusy, setCheckoutBusy] = useState(false);
   const [error, setError] = useState("");
+  const [shippingAddress, setShippingAddress] = useState<ShippingAddress>({
+    fullName: "",
+    phone: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "India",
+  });
   const router = useRouter();
 
   async function mutateItem(key: string, action: () => Promise<void>, success: string) {
@@ -36,12 +57,22 @@ export default function CartPage() {
     }
   }
 
-  async function checkout() {
+  async function checkout(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setCheckoutBusy(true);
     setError("");
     try {
       await loadRazorpay();
-      const { keyId, order } = await api<CreatedOrder>("/cart/payment/create/order", { method: "POST" });
+      const { keyId, order } = await api<CreatedOrder>("/cart/payment/create/order", {
+        method: "POST",
+        body: jsonBody({
+          shippingAddress: {
+            ...shippingAddress,
+            fullName: shippingAddress.fullName || user?.fullname || "",
+            phone: shippingAddress.phone || user?.contact || "",
+          },
+        }),
+      });
       if (!window.Razorpay) throw new Error("Secure checkout is unavailable. Please try again.");
       const instance = new window.Razorpay({
         key: keyId,
@@ -102,15 +133,24 @@ export default function CartPage() {
               );
             })}
           </section>
-          <aside className="order-summary">
+          <form className="order-summary" onSubmit={checkout}>
             <span className="eyebrow">THE SUMMARY</span>
+            <div className="checkout-address">
+              <span className="eyebrow">DELIVERY ADDRESS</span>
+              <label>FULL NAME<input autoComplete="name" value={shippingAddress.fullName || user?.fullname || ""} onChange={(event) => setShippingAddress({ ...shippingAddress, fullName: event.target.value })} maxLength={120} required /></label>
+              <label>PHONE<input type="tel" autoComplete="tel" value={shippingAddress.phone || user?.contact || ""} onChange={(event) => setShippingAddress({ ...shippingAddress, phone: event.target.value })} minLength={7} maxLength={20} required /></label>
+              <label>ADDRESS LINE 1<input autoComplete="address-line1" value={shippingAddress.addressLine1} onChange={(event) => setShippingAddress({ ...shippingAddress, addressLine1: event.target.value })} maxLength={200} required /></label>
+              <label>ADDRESS LINE 2 <small>OPTIONAL</small><input autoComplete="address-line2" value={shippingAddress.addressLine2} onChange={(event) => setShippingAddress({ ...shippingAddress, addressLine2: event.target.value })} maxLength={200} /></label>
+              <div className="checkout-address__city"><label>CITY<input autoComplete="address-level2" value={shippingAddress.city} onChange={(event) => setShippingAddress({ ...shippingAddress, city: event.target.value })} maxLength={80} required /></label><label>POSTAL CODE<input autoComplete="postal-code" value={shippingAddress.postalCode} onChange={(event) => setShippingAddress({ ...shippingAddress, postalCode: event.target.value })} minLength={3} maxLength={12} required /></label></div>
+              <div className="checkout-address__city"><label>STATE / REGION<input autoComplete="address-level1" value={shippingAddress.state} onChange={(event) => setShippingAddress({ ...shippingAddress, state: event.target.value })} maxLength={80} required /></label><label>COUNTRY<input autoComplete="country-name" value={shippingAddress.country} onChange={(event) => setShippingAddress({ ...shippingAddress, country: event.target.value })} maxLength={80} required /></label></div>
+            </div>
             <div className="order-summary__row"><span>Subtotal</span><strong>{formatPrice(cart.totalPrice, cart.currency)}</strong></div>
             <div className="order-summary__row"><span>Shipping</span><span>Calculated at checkout</span></div>
-            <p className="order-summary__note">Secure payment powered by Razorpay. Taxes and delivery details are confirmed before you pay.</p>
+            <p className="order-summary__note">Razorpay secure checkout · Test-mode keys are recommended while testing. Shipping fees and taxes are not included.</p>
             {error && <p className="form-error" role="alert">{error}</p>}
-            <button className="solid-button" onClick={checkout} disabled={checkoutBusy || cartLoading}>{checkoutBusy ? "PREPARING SECURE CHECKOUT…" : "CONTINUE TO PAYMENT"} <span aria-hidden="true">↗</span></button>
+            <button className="solid-button" type="submit" disabled={checkoutBusy || cartLoading}>{checkoutBusy ? "PREPARING SECURE CHECKOUT…" : "CONTINUE TO PAYMENT"} <span aria-hidden="true">↗</span></button>
             <Link href="/#collection" className="text-link">CONTINUE EXPLORING <span aria-hidden="true">↗</span></Link>
-          </aside>
+          </form>
         </div>
       ) : (
         <div className="empty-state"><span className="eyebrow">A CLEAN SLATE</span><h2>Nothing in the bag.<br /><em>For now.</em></h2><p>The good ones have a way of finding their way here.</p><Link className="solid-button" href="/#collection">EXPLORE THE EDIT <span aria-hidden="true">↗</span></Link></div>

@@ -17,6 +17,9 @@ const variantSchema = new Schema({
 const productSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
+  category: { type: String, trim: true, default: "Other" },
+  sku: { type: String, trim: true, default: "" },
+  isActive: { type: Boolean, default: true },
   seller: { type: Schema.Types.ObjectId, ref: "user", required: true },
   price: { type: priceSchema, required: true },
   images: [imageSchema],

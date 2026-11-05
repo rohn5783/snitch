@@ -16,6 +16,11 @@ export default function CreateProductPage() {
   const [description, setDescription] = useState("");
   const [priceAmount, setPriceAmount] = useState("");
   const [priceCurrency, setPriceCurrency] = useState("INR");
+  const [category, setCategory] = useState("Clothing");
+  const [sku, setSku] = useState("");
+  const [optionName, setOptionName] = useState("Size");
+  const [optionValue, setOptionValue] = useState("One size");
+  const [stock, setStock] = useState("1");
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -55,6 +60,11 @@ export default function CreateProductPage() {
       data.append("description", description.trim());
       data.append("priceAmount", priceAmount);
       data.append("priceCurrency", priceCurrency);
+      data.append("category", category);
+      data.append("sku", sku.trim());
+      data.append("optionName", optionName.trim());
+      data.append("optionValue", optionValue.trim());
+      data.append("stock", stock);
       images.forEach((image) => data.append("images", image));
       await api("/products", { method: "POST", body: data });
       router.push("/seller/dashboard");
@@ -73,8 +83,11 @@ export default function CreateProductPage() {
         <div className="editor-form__fields">
           <label>THE NAME<input value={title} onChange={(event) => setTitle(event.target.value)} minLength={2} maxLength={120} required placeholder="A name worth remembering" /></label>
           <label>THE STORY<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} maxLength={3000} required placeholder="What makes this piece feel different?" /></label>
-          <div className="editor-form__price"><label>THE PRICE<input type="number" value={priceAmount} onChange={(event) => setPriceAmount(event.target.value)} min="1" step="1" required placeholder="0" /></label><label>IN<select value={priceCurrency} onChange={(event) => setPriceCurrency(event.target.value)}>{["INR", "USD", "EUR", "GBP"].map((currency) => <option key={currency}>{currency}</option>)}</select></label></div>
-          <p className="form-hint">The price shown is the starting price. Add sizes, colours and inventory from your studio after creating the listing.</p>
+          <div className="editor-form__price"><label>THE PRICE<input type="number" value={priceAmount} onChange={(event) => setPriceAmount(event.target.value)} min="0.01" step="0.01" required placeholder="0.00" /></label><label>IN<select value={priceCurrency} onChange={(event) => setPriceCurrency(event.target.value)}>{["INR", "USD", "EUR", "GBP"].map((currency) => <option key={currency}>{currency}</option>)}</select></label></div>
+          <div className="editor-form__price"><label>CATEGORY<select value={category} onChange={(event) => setCategory(event.target.value)}>{["Clothing", "Accessories", "Footwear", "Home", "Other"].map((value) => <option key={value}>{value}</option>)}</select></label><label>SKU <small>OPTIONAL</small><input value={sku} onChange={(event) => setSku(event.target.value)} maxLength={64} placeholder="Your stock code" /></label></div>
+          <div className="editor-form__price"><label>OPTION<input value={optionName} onChange={(event) => setOptionName(event.target.value)} maxLength={40} required placeholder="Size, colour..." /></label><label>VALUE<input value={optionValue} onChange={(event) => setOptionValue(event.target.value)} maxLength={80} required placeholder="One size, black..." /></label></div>
+          <label>STARTING QUANTITY<input type="number" value={stock} onChange={(event) => setStock(event.target.value)} min="0" step="1" required /></label>
+          <p className="form-hint">Your listing and first option go live together. Add more sizes or colours from your studio at any time.</p>
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="solid-button" type="submit" disabled={busy}>{busy ? "PUBLISHING THE PIECE…" : "PUBLISH THE PIECE"} <span aria-hidden="true">↗</span></button>
         </div>

@@ -15,6 +15,7 @@ type PopulatedProduct = {
   title: string;
   description: string;
   seller: Types.ObjectId;
+  isActive?: boolean;
   price: { amount: number; currency: string };
   images: Array<{ url: string }>;
   variants: Array<{
@@ -42,7 +43,7 @@ type CartDocument = {
 type ProductDocument = {
   _id: Types.ObjectId;
   price: { amount: number; currency: string };
-  variants: Array<{ _id: Types.ObjectId; stock: number }>;
+  variants: Array<{ _id: Types.ObjectId; stock: number; price?: { amount: number; currency: string } }>;
 };
 
 async function cartDetails(userId: Types.ObjectId) {
@@ -92,12 +93,23 @@ export async function addToCart(request: NextRequest, productId: string, variant
   const quantity = body.quantity === undefined ? 1 : Number(body.quantity);
   if (!Number.isInteger(quantity) || quantity < 1) throw new ApiError("Quantity must be at least 1", 400);
   await connectDB();
-  const product = await Product.findOne({ _id: productId, "variants._id": variantId }) as unknown as ProductDocument | null;
+  const product = await Product.findOne({ _id: productId, isActive: { $ne: false }, "variants._id": variantId }) as unknown as ProductDocument | null;
   if (!product) throw new ApiError("Product or variant not found", 404);
   const variant = product.variants.find((option) => option._id.toString() === variantId);
   if (!variant) throw new ApiError("Product or variant not found", 404);
 
   const cart = ((await Cart.findOne({ user: user._id })) ?? await Cart.create({ user: user._id, items: [] })) as unknown as CartDocument;
+  const existingProducts = cart.items.length
+    ? await Product.find({ _id: { $in: cart.items.map((item) => item.product) } }).select("price variants") as unknown as ProductDocument[]
+    : [];
+  const existingCurrencies = cart.items.map((item) => {
+    const existingProduct = existingProducts.find((entry) => entry._id.toString() === item.product.toString());
+    const existingVariant = existingProduct?.variants.find((option) => option._id.toString() === item.variant?.toString());
+    return existingVariant?.price?.currency ?? existingProduct?.price.currency;
+  }).filter((currency): currency is string => Boolean(currency));
+  if (existingCurrencies.some((currency) => currency !== (variant.price?.currency ?? product.price.currency))) {
+    throw new ApiError("A shopping bag can only contain products in one currency", 409);
+  }
   const existing = cart.items.find((item: CartEntry) =>
     item.product.toString() === productId && item.variant?.toString() === variantId,
   );
@@ -116,7 +128,7 @@ export async function incrementCartItem(request: NextRequest, productId: string,
     throw new ApiError("Invalid product or variant ID", 400);
   }
   await connectDB();
-  const product = await Product.findOne({ _id: productId, "variants._id": variantId }) as unknown as ProductDocument | null;
+  const product = await Product.findOne({ _id: productId, isActive: { $ne: false }, "variants._id": variantId }) as unknown as ProductDocument | null;
   const variant = product?.variants.find((option) => option._id.toString() === variantId);
   if (!product || !variant) throw new ApiError("Product or variant not found", 404);
   const cart = await Cart.findOne({ user: user._id }) as unknown as CartDocument | null;
@@ -147,10 +159,48 @@ export async function removeFromCart(request: NextRequest, productId: string, va
 
 export async function createPaymentOrder(request: NextRequest) {
   const user = await authenticate(request);
+  const body = await readJson(request);
+  const rawAddress = body.shippingAddress;
+  if (!rawAddress || typeof rawAddress !== "object" || Array.isArray(rawAddress)) {
+    throw new ApiError("Add your delivery address before checkout", 400);
+  }
+  const address = rawAddress as Record<string, unknown>;
+  const shippingAddress = {
+    fullName: typeof address.fullName === "string" ? address.fullName.trim() : "",
+    phone: typeof address.phone === "string" ? address.phone.trim() : "",
+    addressLine1: typeof address.addressLine1 === "string" ? address.addressLine1.trim() : "",
+    addressLine2: typeof address.addressLine2 === "string" ? address.addressLine2.trim() : "",
+    city: typeof address.city === "string" ? address.city.trim() : "",
+    state: typeof address.state === "string" ? address.state.trim() : "",
+    postalCode: typeof address.postalCode === "string" ? address.postalCode.trim() : "",
+    country: typeof address.country === "string" ? address.country.trim() : "",
+  };
+  if (
+    shippingAddress.fullName.length < 2 || shippingAddress.fullName.length > 120
+    || !/^[0-9+()\s-]{7,20}$/.test(shippingAddress.phone)
+    || !shippingAddress.addressLine1 || shippingAddress.addressLine1.length > 200
+    || shippingAddress.addressLine2.length > 200
+    || !shippingAddress.city || shippingAddress.city.length > 80
+    || !shippingAddress.state || shippingAddress.state.length > 80
+    || !/^[a-zA-Z0-9 -]{3,12}$/.test(shippingAddress.postalCode)
+    || !shippingAddress.country || shippingAddress.country.length > 80
+  ) {
+    throw new ApiError("Enter a valid delivery name, phone, street, city, state, postal code and country", 400);
+  }
   const cart = await cartDetails(user._id);
   if (!cart.items.length || cart.totalPrice <= 0) throw new ApiError("Cart is empty", 400);
+  if (cart.items.some((item) => (item.variant.price?.currency ?? item.product.price.currency) !== cart.currency)) {
+    throw new ApiError("A shopping bag can only contain products in one currency. Remove items in another currency to continue.", 409);
+  }
+  for (const item of cart.items) {
+    if (item.product.isActive === false) throw new ApiError(`${item.product.title} is no longer available`, 409);
+    if (item.variant.stock < item.quantity) throw new ApiError(`Only ${item.variant.stock} of ${item.product.title} remain in stock`, 409);
+  }
 
   const keyId = requiredEnv("RAZORPAY_KEY_ID");
+  if (!keyId.startsWith("rzp_test_")) {
+    throw new ApiError("Razorpay test mode requires a key ID beginning with rzp_test_.", 503);
+  }
   const keySecret = requiredEnv("RAZORPAY_KEY_SECRET");
   const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
   const order = await razorpay.orders.create({
@@ -160,6 +210,7 @@ export async function createPaymentOrder(request: NextRequest) {
 
   await Payment.create({
     user: user._id,
+    shippingAddress,
     razorpay: { orderId: order.id },
     price: { amount: cart.totalPrice, currency: cart.currency },
     orderItems: cart.items.map((item) => {

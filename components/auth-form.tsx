@@ -58,7 +58,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
           <button type="submit" className="solid-button auth-submit" disabled={busy}>{busy ? "ONE MOMENT…" : isRegister ? "CREATE YOUR ACCOUNT" : "SIGN IN"} <span aria-hidden="true">↗</span></button>
         </form>
         <div className="auth-divider"><span>OR</span></div>
-        <form action="/api/auth/google" method="get">
+        <form className="oauth-form" action="/api/auth/google" method="get">
           <button className="oauth-button" type="submit"><GoogleMark /> Continue with Google</button>
         </form>
         <p className="auth-switch">{isRegister ? "Already know your way around?" : "New to the edit?"} <Link href={isRegister ? "/login" : "/register"}>{isRegister ? "Sign in" : "Create an account"}</Link></p>

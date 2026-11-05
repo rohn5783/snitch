@@ -18,17 +18,26 @@ async function dispatch(request: NextRequest, context: RouteContext) {
     if (path === "auth/login" && method === "POST") return await auth.login(request);
     if (path === "auth/logout" && method === "POST") return await auth.logout();
     if (path === "auth/me" && method === "GET") return await auth.getMe(request);
-    if (path === "auth/google" && method === "GET") return await auth.startGoogleOAuth();
+    if (path === "auth/google" && method === "GET") return await auth.startGoogleOAuth(request);
     if (path === "auth/google/callback" && method === "GET") return await auth.finishGoogleOAuth(request);
 
     if (path === "products/seller" && method === "GET") return await products.getSellerProducts(request);
+    if (segments[0] === "products" && segments[1] === "seller" && segments.length === 3 && method === "GET") {
+      return await products.getSellerProduct(request, segments[2]);
+    }
     if (path === "products" && method === "GET") return await products.getProducts(request);
     if (path === "products" && method === "POST") return await products.createProduct(request);
+    if (segments[0] === "products" && segments.length === 2 && method === "PATCH") {
+      return await products.updateSellerProduct(request, segments[1]);
+    }
     if (segments[0] === "products" && segments[1] === "detail" && segments.length === 3 && method === "GET") {
       return await products.getProduct(segments[2]);
     }
     if (segments[0] === "products" && segments.length === 3 && segments[2] === "variants" && method === "POST") {
       return await products.addProductVariant(request, segments[1]);
+    }
+    if (segments[0] === "products" && segments.length === 4 && segments[2] === "variants" && method === "PATCH") {
+      return await products.updateProductVariant(request, segments[1], segments[3]);
     }
 
     if (path === "cart" && method === "GET") return await cart.getCart(request);

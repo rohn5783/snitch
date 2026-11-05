@@ -50,9 +50,13 @@ export function logout() {
   return response;
 }
 
-export function startGoogleOAuth() {
+function googleCallbackUrl(request: NextRequest) {
+  return new URL("/auth/google/callback", request.nextUrl.origin).toString();
+}
+
+export function startGoogleOAuth(request: NextRequest) {
   const clientId = requiredEnv("GOOGLE_CLIENT_ID");
-  const callbackUrl = requiredEnv("GOOGLE_CALLBACK_URL");
+  const callbackUrl = googleCallbackUrl(request);
   const state = jwt.sign({ nonce: randomUUID() }, requiredEnv("JWT_SECRET"), { expiresIn: "10m" });
   const googleUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   googleUrl.searchParams.set("client_id", clientId);
@@ -91,7 +95,7 @@ export async function finishGoogleOAuth(request: NextRequest) {
         code,
         client_id: requiredEnv("GOOGLE_CLIENT_ID"),
         client_secret: requiredEnv("GOOGLE_CLIENT_SECRET"),
-        redirect_uri: requiredEnv("GOOGLE_CALLBACK_URL"),
+        redirect_uri: googleCallbackUrl(request),
         grant_type: "authorization_code",
       }),
       cache: "no-store",

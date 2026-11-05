@@ -28,10 +28,24 @@ export function HomeStorefront({ initialSearch, sort }: { initialSearch: string;
   useEditorialMotion();
 
   useEffect(() => {
-    api<{ products: Product[] }>("/products")
-      .then((response) => setProducts(response.products ?? []))
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "The collection could not be loaded."))
-      .finally(() => setLoading(false));
+    let active = true;
+    const loadProducts = () => api<{ products: Product[] }>("/products")
+      .then((response) => {
+        if (active) {
+          setProducts(response.products ?? []);
+          setError("");
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : "The collection could not be loaded.");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    void loadProducts();
+    const timer = window.setInterval(() => { void loadProducts(); }, 30000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
 
   const visibleProducts = useMemo(() => {

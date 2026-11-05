@@ -7,13 +7,23 @@ import Payment from "@/lib/server/models/payment";
 import Product from "@/lib/server/models/product";
 
 type OrderItem = {
+  _id?: Types.ObjectId;
   sellerId?: Types.ObjectId;
   productId: Types.ObjectId;
   price?: { amount?: number };
   quantity?: number;
   fulfillmentStatus?: string;
+  title?: string;
   toObject: () => Record<string, unknown>;
 };
+
+const fulfillmentSteps = ["pending", "processing", "ready", "dispatched", "delivered"] as const;
+type FulfillmentStatus = typeof fulfillmentSteps[number];
+
+function normalizedStatus(status?: string): FulfillmentStatus {
+  if (status === "complete") return "delivered";
+  return fulfillmentSteps.includes(status as FulfillmentStatus) ? status as FulfillmentStatus : "pending";
+}
 
 export async function getUserOrders(request: NextRequest) {
   const user = await authenticate(request);
@@ -43,7 +53,7 @@ export async function getSellerOrders(request: NextRequest) {
         : productIds.has(item.productId.toString()));
     const orderItems = ownedItems.map((item) => ({
       ...item.toObject(),
-      fulfillmentStatus: item.fulfillmentStatus || "pending",
+      fulfillmentStatus: normalizedStatus(item.fulfillmentStatus),
     }));
     const sellerTotal = ownedItems.reduce(
       (total, item) => total + (Number(item.price?.amount) || 0) * (Number(item.quantity) || 0),
@@ -55,12 +65,13 @@ export async function getSellerOrders(request: NextRequest) {
       razorpay: order.razorpay,
       paymentStatus: order.status,
       buyer: order.user,
+      shippingAddress: order.shippingAddress,
       orderItems,
       sellerTotal,
       currency: order.price.currency,
-      fulfillmentStatus: orderItems.length > 0 && orderItems.every((item) => item.fulfillmentStatus === "complete")
-        ? "complete"
-        : "pending",
+      fulfillmentStatus: [...new Set(orderItems.map((item) => normalizedStatus(item.fulfillmentStatus)))].length === 1
+        ? normalizedStatus(orderItems[0]?.fulfillmentStatus)
+        : "processing",
     };
   }).filter((order) => order.orderItems.length > 0);
 
@@ -71,9 +82,12 @@ export async function updateSellerOrderStatus(request: NextRequest, orderId: str
   const seller = await authenticate(request, true);
   const body = await readJson(request);
   const status = body.status;
-  if (status !== "pending" && status !== "complete") {
-    throw new ApiError("Status must be either pending or complete", 400);
+  const itemId = typeof body.itemId === "string" ? body.itemId : "";
+  if (!fulfillmentSteps.includes(status as FulfillmentStatus) || status === "pending") {
+    throw new ApiError("Choose the next order fulfillment step", 400);
   }
+  const fulfillmentStatus = status as FulfillmentStatus;
+  if (!Types.ObjectId.isValid(itemId)) throw new ApiError("Invalid order item ID", 400);
   if (!Types.ObjectId.isValid(orderId)) throw new ApiError("Invalid order ID", 400);
   await connectDB();
 
@@ -86,11 +100,15 @@ export async function updateSellerOrderStatus(request: NextRequest, orderId: str
     ? item.sellerId.toString() === seller._id.toString()
     : productIds.has(item.productId.toString()));
   if (!ownedItems.length) throw new ApiError("Order does not contain your products", 404);
-
-  for (const item of ownedItems) {
-    if (!item.sellerId) item.sellerId = new mongoose.Types.ObjectId(seller._id);
-    item.fulfillmentStatus = status;
+  const item = ownedItems.find((entry) => entry._id?.toString() === itemId);
+  if (!item) throw new ApiError("Order item not found", 404);
+  const currentIndex = fulfillmentSteps.indexOf(normalizedStatus(item.fulfillmentStatus));
+  if (fulfillmentSteps[currentIndex + 1] !== fulfillmentStatus) {
+    throw new ApiError(`Order item must move to ${fulfillmentSteps[currentIndex + 1] ?? "delivered"} next`, 409);
   }
+
+  if (!item.sellerId) item.sellerId = new mongoose.Types.ObjectId(seller._id);
+  item.fulfillmentStatus = fulfillmentStatus;
   await order.save();
-  return Response.json({ message: "Order fulfillment status updated", success: true, status });
+  return Response.json({ message: "Order fulfillment status updated", success: true, status: fulfillmentStatus });
 }

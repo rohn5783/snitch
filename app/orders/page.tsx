@@ -15,10 +15,24 @@ export default function OrdersPage() {
 
   useEffect(() => {
     if (!ready) return;
-    api<{ orders: Order[] }>("/orders")
-      .then((response) => setOrders(response.orders ?? []))
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Order history could not be loaded."))
-      .finally(() => setLoading(false));
+    let active = true;
+    const loadOrders = () => api<{ orders: Order[] }>("/orders")
+      .then((response) => {
+        if (active) {
+          setOrders(response.orders ?? []);
+          setError("");
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : "Order history could not be loaded.");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    void loadOrders();
+    const timer = window.setInterval(() => { void loadOrders(); }, 20000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [ready]);
 
   if (!ready) return <div className="center-state"><span className="loading-mark" /></div>;
@@ -30,7 +44,11 @@ export default function OrdersPage() {
           {orders.map((order) => (
             <article className="order-card" key={order._id}>
               <header className="order-card__head"><div><span className="eyebrow">ORDER / {order.razorpay?.orderId ?? order._id}</span><p>{new Date(order.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" })}</p></div><span className={`status-pill status-pill--${order.status ?? "pending"}`}>{order.status ?? "pending"}</span></header>
-              <div className="order-card__items">{order.orderItems?.map((item) => <div className="order-item" key={item._id ?? item.productId}><div><strong>{item.title}</strong><span>Quantity {item.quantity}{item.fulfillmentStatus ? ` · ${item.fulfillmentStatus}` : ""}</span></div><span>{formatPrice((item.price?.amount ?? 0) * item.quantity, item.price?.currency)}</span></div>)}</div>
+              <div className="order-card__items">{order.orderItems?.map((item) => {
+                const status = item.fulfillmentStatus === "complete" ? "delivered" : item.fulfillmentStatus ?? "pending";
+                return <div className="order-item" key={item._id ?? item.productId}><div><strong>{item.title}</strong><span>Quantity {item.quantity}</span><span className={`status-pill status-pill--${status}`}>{status}</span></div><span>{formatPrice((item.price?.amount ?? 0) * item.quantity, item.price?.currency)}</span></div>;
+              })}</div>
+              {order.shippingAddress && <div className="order-delivery"><span className="eyebrow">DELIVERING TO</span><p>{order.shippingAddress.fullName} · {order.shippingAddress.addressLine1}{order.shippingAddress.addressLine2 ? `, ${order.shippingAddress.addressLine2}` : ""}</p><p>{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}, {order.shippingAddress.country} · {order.shippingAddress.phone}</p></div>}
               <footer className="order-card__foot"><span>TOTAL</span><strong>{formatPrice(order.price?.amount ?? 0, order.price?.currency)}</strong></footer>
             </article>
           ))}

@@ -27,6 +27,9 @@ export type Product = {
   _id: string;
   title: string;
   description: string;
+  category?: string;
+  sku?: string;
+  isActive?: boolean;
   price: Price;
   images: ProductImage[];
   variants: ProductVariant[];
@@ -54,7 +57,7 @@ export type OrderItem = {
   productId: string;
   variantId: string;
   quantity: number;
-  fulfillmentStatus?: "pending" | "complete";
+  fulfillmentStatus?: "pending" | "processing" | "ready" | "dispatched" | "delivered" | "complete";
   images: ProductImage[];
   price: Price;
 };
@@ -68,6 +71,16 @@ export type Order = {
   currency?: string;
   razorpay?: { orderId?: string };
   buyer?: { fullname?: string; email?: string; contact?: string };
+  shippingAddress?: {
+    fullName?: string;
+    phone?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+  };
   orderItems: OrderItem[];
   createdAt: string;
   fulfillmentStatus?: "pending" | "complete";

@@ -8,8 +8,8 @@ A fashion marketplace served by one Next.js application, with a photo-led editor
 - Editorial fashion photography in the homepage hero.
 - Product detail pages with real product photography, selectable backend variants and an optional drag-to-rotate GLB viewer.
 - Sign in, registration, Google OAuth entry point, account profile, saved items and order history.
-- Cookie-authenticated cart, Razorpay checkout creation, signature verification, inventory updates and order history.
-- Seller studio for listings, inventory variants and order fulfillment.
+- Cookie-authenticated cart, delivery-address capture, Razorpay test checkout, signature verification, inventory updates and order history.
+- Seller studio for product details, categories, SKU, listing availability, option pricing and stock, plus prepare/ready/dispatch/delivered order fulfillment.
 - Next.js Route Handlers for authentication, products, cart, wishlist, orders, seller tools and payments.
 - GSAP scroll reveals, Framer Motion entrances/transitions, keyboard-friendly controls and reduced-motion support.
 
@@ -51,16 +51,17 @@ MONGO_URI=<your-mongodb-connection-string>
 JWT_SECRET=<a-long-random-secret>
 GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
 GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
-GOOGLE_CALLBACK_URL=http://localhost:5173/auth/google/callback
 IMAGEKIT_PRIVATE_KEY=<your-imagekit-private-key>
 RAZORPAY_KEY_ID=<your-razorpay-key-id>
 RAZORPAY_KEY_SECRET=<your-razorpay-key-secret>
 NODE_ENV=development
 ```
 
-Add **exactly** `http://localhost:5173/auth/google/callback` to the authorized redirect URIs in Google Cloud and set the same value for `GOOGLE_CALLBACK_URL`. The callback is handled directly by Next.js. For production, use the matching public application origin for both values.
+Add **exactly** `http://localhost:5173/auth/google/callback` to the authorized redirect URIs in Google Cloud. The callback URL is generated from the current app origin and handled directly by Next.js. For production, add `<your-public-origin>/auth/google/callback` to the authorized redirect URIs.
 
 MongoDB is required for catalog and account routes. Google OAuth, ImageKit and Razorpay credentials are required only for their respective features. Razorpay checkout uses the real order and signature-verification APIs; the checkout script loads only when a buyer starts checkout.
+
+Checkout is deliberately locked to Razorpay **test mode**: configure a test key ID beginning with `rzp_test_` and its matching test secret. The server rejects live key IDs, so test purchases cannot charge a live account. Sellers publish a product with its first option and stock quantity; published listings appear in the storefront. Buyers provide a delivery address before opening Razorpay Checkout, and sellers can update each paid order item through preparation, ready, dispatched and delivered.
 
 ## Optional 3D assets
 
@@ -105,9 +106,9 @@ The Next.js Route Handlers use the existing MongoDB models and preserve the mark
 | API path | Use |
 | --- | --- |
 | `/api/auth` | Registration, login, logout and current user |
-| `/api/products` | Product catalog, details, seller listings and variant creation |
-| `/api/cart` | Cart, Razorpay order creation and payment verification |
+| `/api/products` | Live catalog, seller-only listing creation/editing, availability and option inventory |
+| `/api/cart` | Cart, delivery details, Razorpay test order creation and payment verification |
 | `/api/wishlist` | Saved products |
-| `/api/orders` | Buyer order history and seller fulfillment |
+| `/api/orders` | Buyer order history and per-item seller fulfillment progression |
 
 Product creation and variant images are uploaded to ImageKit, limited to seven images per request and 5 MB per file.
