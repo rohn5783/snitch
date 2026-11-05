@@ -75,6 +75,9 @@ export function SiteHeader() {
           </button>
         </div>
       </div>
+      <nav className="mobile-category-nav" aria-label="Shop categories">
+        {mainLinks.map((item) => <Link key={item.label} href={item.href}>{item.label}</Link>)}
+      </nav>
       <div className={`mobile-scrim ${menuOpen ? "mobile-scrim--visible" : ""}`} onClick={() => setMenuOpen(false)} aria-hidden="true" />
     </header>
   );

@@ -27,6 +27,7 @@ img { display: block; max-width: 100%; }
 .eyebrow { display: inline-block; font-size: 9px; font-weight: 600; letter-spacing: .19em; line-height: 1.6; }
 .page-gutter { padding-right: var(--gutter); padding-left: var(--gutter); }
 .mobile-only { display: none !important; }
+.mobile-category-nav { display: none; }
 
 .site-header { position: sticky; z-index: 40; top: 0; height: 74px; background: rgba(245, 244, 239, .95); backdrop-filter: blur(18px); border-bottom: 1px solid rgba(31, 30, 27, .09); }
 .site-header__inner { position: relative; display: flex; align-items: center; justify-content: space-between; max-width: 1800px; height: 100%; margin: 0 auto; padding: 0 var(--gutter); }
@@ -461,9 +462,9 @@ body:has(.auth-page) .site-footer { display: none; }
 
 @media (max-width: 760px) {
   :root { --gutter: 21px; }
-  html { scroll-padding-top: 65px; }
-  .site-header { height: 64px; }
-  .site-header__inner { gap: 11px; padding: 0 18px; }
+  html { scroll-padding-top: 109px; }
+  .site-header { height: 108px; }
+  .site-header__inner { height: 64px; gap: 11px; padding: 0 18px; }
   .mobile-menu-toggle { display: inline-flex; order: -1; }
   .menu-glyph { font-size: 18px; }
   .wordmark { font-size: 17px; }
@@ -472,6 +473,9 @@ body:has(.auth-page) .site-footer { display: none; }
   .primary-nav--open { transform: translateX(0); }
   .primary-nav a { width: 100%; padding: 17px 0; border-bottom: 1px solid var(--line); font-family: var(--serif); font-size: 23px; font-weight: 400; letter-spacing: -.02em; text-transform: none; }
   .mobile-only { display: block !important; }
+  .mobile-category-nav { display: flex; align-items: center; gap: clamp(10px, 3.2vw, 17px); height: 44px; padding: 0 18px; overflow-x: auto; border-top: 1px solid rgba(31, 30, 27, .08); scrollbar-width: none; }
+  .mobile-category-nav::-webkit-scrollbar { display: none; }
+  .mobile-category-nav a { flex: 0 0 auto; padding: 12px 0; font-size: 10px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
   .mobile-scrim--visible { position: fixed; z-index: 41; inset: 64px 0 0; display: block; background: #10100ec4; }
   .header-actions { gap: 13px; }
   .header-actions .account-action, .header-actions .sell-action, .header-actions .search-action { display: none; }
