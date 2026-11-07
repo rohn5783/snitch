@@ -1,0 +1,61 @@
+name: SNITCH CI Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  validate:
+    name: Lint, Typecheck, Test & Build
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: TypeScript Typecheck
+        run: npm run typecheck
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Unit & Integration Tests with Coverage
+        run: npm run test:coverage
+        env:
+          NODE_ENV: test
+          MONGO_URI: mongodb://127.0.0.1:27017/snitch_ci
+          JWT_SECRET: ci_secret_key_at_least_32_characters_for_signing
+          REDIS_URL: redis://127.0.0.1:6379
+          RAZORPAY_KEY_ID: rzp_test_mock_ci
+          RAZORPAY_KEY_SECRET: rzp_test_secret_ci
+          RAZORPAY_WEBHOOK_SECRET: rzp_test_secret_ci
+
+      - name: Build Next.js Production Bundle
+        run: npm run build
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: 1
+          MONGO_URI: mongodb://127.0.0.1:27017/snitch_ci
+          JWT_SECRET: ci_secret_key_at_least_32_characters_for_signing
+

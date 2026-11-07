@@ -27,3 +27,4 @@ next-env.d.ts
 *.sw?
 .env
 .env.local
+coverage/

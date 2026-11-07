@@ -5,18 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --port 5173",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start --port 5173",
     "lint": "eslint app components hooks lib types",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@imagekit/nodejs": "^7.14.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.1.2",
+    "@vitest/coverage-v8": "^5.1.0",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^6.7.1",
     "framer-motion": "^12.23.12",
     "gsap": "^3.13.0",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.12.0",
     "next": "^16.0.0",
@@ -24,10 +31,13 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "sass": "^1.89.2",
-    "three": "^0.177.0"
+    "three": "^0.177.0",
+    "vitest": "^5.1.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.14",

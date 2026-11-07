@@ -11,8 +11,8 @@
   --surface-raised: #f9f8f4;
   --surface-inset: #eae8e1;
   --field-line: #bbb7ad;
-  --sans: var(--font-sans), sans-serif;
-  --serif: var(--font-serif), serif;
+  --sans: 'Manrope', var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  --serif: 'Cormorant Garamond', var(--font-serif, 'Times New Roman', Garamond, Georgia, serif);
   --gutter: clamp(24px, 6.05vw, 100px);
 }
 

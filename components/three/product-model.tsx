@@ -37,5 +37,19 @@ export function ProductModel({ src, tint }: { src: string; tint: string }) {
     });
   }, [model, tint]);
 
+  // Clean up WebGL GPU geometries and cloned materials on unmount
+  useEffect(() => {
+    const root = model.copy;
+    return () => {
+      root.traverse((object: Object3D) => {
+        const mesh = object as Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry?.dispose();
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((m) => m?.dispose());
+      });
+    };
+  }, [model]);
+
   return <primitive object={model.copy} />;
 }

@@ -1,169 +1,183 @@
-import mongoose, { Types, type ClientSession } from "mongoose";
-import Razorpay from "razorpay";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { Types } from "mongoose";
 import type { NextRequest } from "next/server";
-import { authenticate } from "@/lib/server/auth";
-import { requiredEnv } from "@/lib/server/env";
-import { ApiError, readJson } from "@/lib/server/errors";
-import { connectDB } from "@/lib/server/db";
+import { connectDB } from "@/lib/server/database/connection";
+import { AppError } from "@/lib/server/errors/api-error";
+import { readJson } from "@/lib/server/errors/index";
+import { requireAuth } from "@/lib/server/middleware/auth-guard";
+import { standardResponse } from "@/lib/server/middleware/request-context";
 import Cart from "@/lib/server/models/cart";
-import Payment from "@/lib/server/models/payment";
 import Product from "@/lib/server/models/product";
-
-type PopulatedProduct = {
-  _id: Types.ObjectId;
-  title: string;
-  description: string;
-  seller: Types.ObjectId;
-  isActive?: boolean;
-  price: { amount: number; currency: string };
-  images: Array<{ url: string }>;
-  variants: Array<{
-    _id: Types.ObjectId;
-    stock: number;
-    images: Array<{ url: string }>;
-    attributes?: Map<string, string>;
-    price?: { amount: number; currency: string };
-  }>;
-};
-
-type CartEntry = {
-  _id?: Types.ObjectId;
-  product: Types.ObjectId;
-  variant?: Types.ObjectId;
-  quantity: number;
-  price: { amount: number; currency: string };
-};
-
-type CartDocument = {
-  items: CartEntry[];
-  save: (options?: { session?: ClientSession }) => Promise<unknown>;
-};
-
-type ProductDocument = {
-  _id: Types.ObjectId;
-  price: { amount: number; currency: string };
-  variants: Array<{ _id: Types.ObjectId; stock: number; price?: { amount: number; currency: string } }>;
-};
-
-async function cartDetails(userId: Types.ObjectId) {
-  await connectDB();
-  let cart = await Cart.findOne({ user: userId }).populate("items.product");
-  if (!cart) cart = await Cart.create({ user: userId, items: [] });
-
-  const cartRecord = cart.toObject() as unknown as {
-    _id: Types.ObjectId;
-    items: Array<{
-      _id: Types.ObjectId;
-      product: PopulatedProduct;
-      variant: Types.ObjectId;
-      quantity: number;
-      price: { amount: number; currency: string };
-    }>;
-  };
-  let totalPrice = 0;
-  let currency = "INR";
-  let hasCurrency = false;
-  const items = cartRecord.items.flatMap((item) => {
-    const product = item.product;
-    const variant = product?.variants.find((option) => option._id.toString() === item.variant?.toString());
-    if (!product || !variant) return [];
-    const unitPrice = variant.price ?? product.price;
-    totalPrice += unitPrice.amount * item.quantity;
-    if (!hasCurrency) currency = unitPrice.currency;
-    hasCurrency = true;
-    return [{ ...item, product, variant }];
-  });
-
-  return { _id: cartRecord._id, items, totalPrice, currency };
-}
+import { paymentService } from "@/lib/server/services/payment.service";
 
 export async function getCart(request: NextRequest) {
-  const user = await authenticate(request);
-  const cart = await cartDetails(user._id);
-  return Response.json({ message: "Cart fetched successfully", success: true, cart });
+  const user = await requireAuth(request);
+  const cart = await paymentService.getCartDetails(user._id);
+
+  return standardResponse(
+    { cart },
+    {
+      message: "Cart fetched successfully",
+      extra: { cart },
+    },
+  );
 }
 
 export async function addToCart(request: NextRequest, productId: string, variantId: string) {
-  const user = await authenticate(request);
+  const user = await requireAuth(request);
   if (!Types.ObjectId.isValid(productId) || !Types.ObjectId.isValid(variantId)) {
-    throw new ApiError("Invalid product or variant ID", 400);
+    throw AppError.badRequest("Invalid product or variant ID");
   }
+
   const body = await readJson(request);
   const quantity = body.quantity === undefined ? 1 : Number(body.quantity);
-  if (!Number.isInteger(quantity) || quantity < 1) throw new ApiError("Quantity must be at least 1", 400);
-  await connectDB();
-  const product = await Product.findOne({ _id: productId, isActive: { $ne: false }, "variants._id": variantId }) as unknown as ProductDocument | null;
-  if (!product) throw new ApiError("Product or variant not found", 404);
-  const variant = product.variants.find((option) => option._id.toString() === variantId);
-  if (!variant) throw new ApiError("Product or variant not found", 404);
-
-  const cart = ((await Cart.findOne({ user: user._id })) ?? await Cart.create({ user: user._id, items: [] })) as unknown as CartDocument;
-  const existingProducts = cart.items.length
-    ? await Product.find({ _id: { $in: cart.items.map((item) => item.product) } }).select("price variants") as unknown as ProductDocument[]
-    : [];
-  const existingCurrencies = cart.items.map((item) => {
-    const existingProduct = existingProducts.find((entry) => entry._id.toString() === item.product.toString());
-    const existingVariant = existingProduct?.variants.find((option) => option._id.toString() === item.variant?.toString());
-    return existingVariant?.price?.currency ?? existingProduct?.price.currency;
-  }).filter((currency): currency is string => Boolean(currency));
-  if (existingCurrencies.some((currency) => currency !== (variant.price?.currency ?? product.price.currency))) {
-    throw new ApiError("A shopping bag can only contain products in one currency", 409);
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    throw AppError.badRequest("Quantity must be a positive whole number");
   }
-  const existing = cart.items.find((item: CartEntry) =>
-    item.product.toString() === productId && item.variant?.toString() === variantId,
-  );
-  const nextQuantity = (existing?.quantity ?? 0) + quantity;
-  if (nextQuantity > variant.stock) throw new ApiError(`Only ${variant.stock} items left in stock`, 400);
 
-  if (existing) existing.quantity = nextQuantity;
-  else cart.items.push({ product: product._id, variant: variant._id, quantity, price: product.price });
+  await connectDB();
+  const product = await Product.findOne({
+    _id: productId,
+    isActive: { $ne: false },
+    "variants._id": variantId,
+  });
+
+  if (!product) {
+    throw AppError.notFound("Product or variant not found");
+  }
+
+  const variant = product.variants.find((opt: { _id: { toString(): string } }) => opt._id.toString() === variantId);
+  if (!variant) {
+    throw AppError.notFound("Product or variant not found");
+  }
+
+  let cart = await Cart.findOne({ user: user._id });
+  if (!cart) {
+    cart = await Cart.create({ user: user._id, items: [] });
+  }
+
+  // Currency validation across all cart items
+  const existingProducts = cart.items.length
+    ? await Product.find({ _id: { $in: cart.items.map((i: { product: unknown }) => i.product) } }).select("price variants")
+    : [];
+
+  const existingCurrencies = cart.items
+    .map((item: { product: unknown; variant?: unknown }) => {
+      const ep = existingProducts.find((p) => p._id.toString() === String(item.product));
+      const ev = ep?.variants.find((v: { _id: { toString(): string } }) => v._id.toString() === String(item.variant));
+      return ev?.price?.currency ?? ep?.price.currency;
+    })
+    .filter((c: unknown): c is string => typeof c === "string" && Boolean(c));
+
+  const variantCurrency = variant.price?.currency ?? product.price.currency;
+  if (existingCurrencies.some((c: string) => c !== variantCurrency)) {
+    throw AppError.conflict("A shopping bag can only contain products in one currency");
+  }
+
+  const existing = cart.items.find(
+    (item: { product: unknown; variant?: unknown }) =>
+      String(item.product) === productId && String(item.variant) === variantId,
+  );
+
+  const nextQuantity = (existing?.quantity ?? 0) + quantity;
+  if (nextQuantity > variant.stock) {
+    throw AppError.badRequest(`Only ${variant.stock} items left in stock`);
+  }
+
+  if (existing) {
+    existing.quantity = nextQuantity;
+  } else {
+    cart.items.push({
+      product: product._id,
+      variant: variant._id,
+      quantity,
+      price: product.price,
+    } as unknown as (typeof cart.items)[0]);
+  }
+
   await cart.save();
-  return Response.json({ message: existing ? "Cart updated successfully" : "Product added to cart successfully", success: true });
+  return standardResponse(
+    {},
+    {
+      message: existing ? "Cart updated successfully" : "Product added to cart successfully",
+    },
+  );
 }
 
 export async function incrementCartItem(request: NextRequest, productId: string, variantId: string) {
-  const user = await authenticate(request);
+  const user = await requireAuth(request);
   if (!Types.ObjectId.isValid(productId) || !Types.ObjectId.isValid(variantId)) {
-    throw new ApiError("Invalid product or variant ID", 400);
+    throw AppError.badRequest("Invalid product or variant ID");
   }
+
   await connectDB();
-  const product = await Product.findOne({ _id: productId, isActive: { $ne: false }, "variants._id": variantId }) as unknown as ProductDocument | null;
-  const variant = product?.variants.find((option) => option._id.toString() === variantId);
-  if (!product || !variant) throw new ApiError("Product or variant not found", 404);
-  const cart = await Cart.findOne({ user: user._id }) as unknown as CartDocument | null;
-  if (!cart) throw new ApiError("Cart not found", 404);
-  const item = cart.items.find((entry: CartEntry) =>
-    entry.product.toString() === productId && entry.variant?.toString() === variantId,
-  );
-  if (!item) throw new ApiError("Cart item not found", 404);
-  if (item.quantity + 1 > variant.stock) {
-    throw new ApiError(`Only ${variant.stock} items left in stock. You already have ${item.quantity} in your bag`, 400);
+  const product = await Product.findOne({
+    _id: productId,
+    isActive: { $ne: false },
+    "variants._id": variantId,
+  });
+
+  const variant = product?.variants.find((opt: { _id: { toString(): string } }) => opt._id.toString() === variantId);
+  if (!product || !variant) {
+    throw AppError.notFound("Product or variant not found");
   }
+
+  const cart = await Cart.findOne({ user: user._id });
+  if (!cart) {
+    throw AppError.notFound("Cart not found");
+  }
+
+  const item = cart.items.find(
+    (entry: { product: unknown; variant?: unknown }) =>
+      String(entry.product) === productId && String(entry.variant) === variantId,
+  );
+
+  if (!item) {
+    throw AppError.notFound("Cart item not found");
+  }
+
+  if (item.quantity + 1 > variant.stock) {
+    throw AppError.badRequest(`Only ${variant.stock} items left in stock. You already have ${item.quantity} in your bag`);
+  }
+
   item.quantity += 1;
   await cart.save();
-  return Response.json({ message: "Cart item quantity incremented successfully", success: true });
+
+  return standardResponse(
+    {},
+    { message: "Cart item quantity incremented successfully" },
+  );
 }
 
 export async function removeFromCart(request: NextRequest, productId: string, variantId: string) {
-  const user = await authenticate(request);
+  const user = await requireAuth(request);
   await connectDB();
-  const cart = await Cart.findOne({ user: user._id }) as unknown as CartDocument | null;
-  if (!cart) throw new ApiError("Cart not found", 404);
-  cart.items = cart.items.filter((item: CartEntry) =>
-    item.product.toString() !== productId || item.variant?.toString() !== variantId,
-  );
+
+  const cart = await Cart.findOne({ user: user._id });
+  if (!cart) {
+    throw AppError.notFound("Cart not found");
+  }
+
+  cart.items = cart.items.filter(
+    (item: { product: unknown; variant?: unknown }) =>
+      !(String(item.product) === productId && String(item.variant) === variantId),
+  ) as unknown as typeof cart.items;
+
   await cart.save();
-  return Response.json({ message: "Item removed from cart successfully", success: true });
+  return standardResponse(
+    {},
+    { message: "Item removed from cart successfully" },
+  );
 }
 
 export async function createPaymentOrder(request: NextRequest) {
-  const user = await authenticate(request);
+  const user = await requireAuth(request);
   const body = await readJson(request);
+
   const rawAddress = body.shippingAddress;
   if (!rawAddress || typeof rawAddress !== "object" || Array.isArray(rawAddress)) {
-    throw new ApiError("Add your delivery address before checkout", 400);
+    throw AppError.badRequest("Add your delivery address before checkout");
   }
+
   const address = rawAddress as Record<string, unknown>;
   const shippingAddress = {
     fullName: typeof address.fullName === "string" ? address.fullName.trim() : "",
@@ -175,138 +189,58 @@ export async function createPaymentOrder(request: NextRequest) {
     postalCode: typeof address.postalCode === "string" ? address.postalCode.trim() : "",
     country: typeof address.country === "string" ? address.country.trim() : "",
   };
+
   if (
-    shippingAddress.fullName.length < 2 || shippingAddress.fullName.length > 120
-    || !/^[0-9+()\s-]{7,20}$/.test(shippingAddress.phone)
-    || !shippingAddress.addressLine1 || shippingAddress.addressLine1.length > 200
-    || shippingAddress.addressLine2.length > 200
-    || !shippingAddress.city || shippingAddress.city.length > 80
-    || !shippingAddress.state || shippingAddress.state.length > 80
-    || !/^[a-zA-Z0-9 -]{3,12}$/.test(shippingAddress.postalCode)
-    || !shippingAddress.country || shippingAddress.country.length > 80
+    shippingAddress.fullName.length < 2 ||
+    shippingAddress.fullName.length > 120 ||
+    !/^[0-9+()\s-]{7,20}$/.test(shippingAddress.phone) ||
+    !shippingAddress.addressLine1 ||
+    shippingAddress.addressLine1.length > 200 ||
+    shippingAddress.addressLine2.length > 200 ||
+    !shippingAddress.city ||
+    shippingAddress.city.length > 80 ||
+    !shippingAddress.state ||
+    shippingAddress.state.length > 80 ||
+    !/^[a-zA-Z0-9 -]{3,12}$/.test(shippingAddress.postalCode) ||
+    !shippingAddress.country ||
+    shippingAddress.country.length > 80
   ) {
-    throw new ApiError("Enter a valid delivery name, phone, street, city, state, postal code and country", 400);
-  }
-  const cart = await cartDetails(user._id);
-  if (!cart.items.length || cart.totalPrice <= 0) throw new ApiError("Cart is empty", 400);
-  if (cart.items.some((item) => (item.variant.price?.currency ?? item.product.price.currency) !== cart.currency)) {
-    throw new ApiError("A shopping bag can only contain products in one currency. Remove items in another currency to continue.", 409);
-  }
-  for (const item of cart.items) {
-    if (item.product.isActive === false) throw new ApiError(`${item.product.title} is no longer available`, 409);
-    if (item.variant.stock < item.quantity) throw new ApiError(`Only ${item.variant.stock} of ${item.product.title} remain in stock`, 409);
+    throw AppError.badRequest("Enter a valid delivery name, phone, street, city, state, postal code and country");
   }
 
-  const keyId = requiredEnv("RAZORPAY_KEY_ID");
-  if (!keyId.startsWith("rzp_test_")) {
-    throw new ApiError("Razorpay test mode requires a key ID beginning with rzp_test_.", 503);
-  }
-  const keySecret = requiredEnv("RAZORPAY_KEY_SECRET");
-  const razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-  const order = await razorpay.orders.create({
-    amount: Math.round(cart.totalPrice * 100),
-    currency: cart.currency,
-  });
+  const { keyId, order } = await paymentService.createRazorpayOrder(user._id, shippingAddress);
 
-  await Payment.create({
-    user: user._id,
-    shippingAddress,
-    razorpay: { orderId: order.id },
-    price: { amount: cart.totalPrice, currency: cart.currency },
-    orderItems: cart.items.map((item) => {
-      const variantPrice = item.variant.price ?? item.product.price;
-      return {
-        title: item.product.title,
-        productId: item.product._id,
-        sellerId: item.product.seller,
-        variantId: item.variant._id,
-        quantity: item.quantity,
-        images: item.variant.images.length ? item.variant.images : item.product.images,
-        description: item.product.description,
-        price: { amount: variantPrice.amount, currency: variantPrice.currency },
-      };
-    }),
-  });
-
-  return Response.json({ message: "Order created successfully", success: true, keyId, order });
+  return standardResponse(
+    { keyId, order },
+    {
+      message: "Order created successfully",
+      extra: { keyId, order },
+    },
+  );
 }
 
 export async function verifyPaymentOrder(request: NextRequest) {
-  const user = await authenticate(request);
+  const user = await requireAuth(request);
   const body = await readJson(request);
+
   const orderId = typeof body.razorpay_order_id === "string" ? body.razorpay_order_id : "";
   const paymentId = typeof body.razorpay_payment_id === "string" ? body.razorpay_payment_id : "";
   const signature = typeof body.razorpay_signature === "string" ? body.razorpay_signature : "";
-  if (!orderId || !paymentId || !signature) throw new ApiError("Incomplete payment verification details", 400);
 
-  const expected = createHmac("sha256", requiredEnv("RAZORPAY_KEY_SECRET"))
-    .update(`${orderId}|${paymentId}`)
-    .digest();
-  const received = Buffer.from(signature, "hex");
-  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
-    throw new ApiError("Payment verification failed", 400);
+  if (!orderId || !paymentId || !signature) {
+    throw AppError.badRequest("Incomplete payment verification details");
   }
 
-  await connectDB();
-  const session = await mongoose.startSession();
-  let alreadyProcessed = false;
-  try {
-    await session.withTransaction(async () => {
-      const payment = await Payment.findOne({
-        "razorpay.orderId": orderId,
-        user: user._id,
-      }).session(session);
-      if (!payment) throw new ApiError("Payment not found", 404);
-      if (payment.status === "paid") {
-        if (payment.razorpay.paymentId !== paymentId) {
-          throw new ApiError("Order was already paid with a different payment", 409);
-        }
-        alreadyProcessed = true;
-        return;
-      }
-      if (payment.status !== "pending") throw new ApiError("Payment is not pending", 409);
-
-      const orderItems = payment.orderItems as unknown as Array<{
-        title: string;
-        productId: Types.ObjectId;
-        variantId: Types.ObjectId;
-        quantity: number;
-      }>;
-      for (const item of orderItems) {
-        const result = await Product.updateOne({
-          _id: item.productId,
-          variants: { $elemMatch: { _id: item.variantId, stock: { $gte: item.quantity } } },
-        }, { $inc: { "variants.$.stock": -item.quantity } }, { session });
-        if (result.modifiedCount !== 1) throw new ApiError(`Insufficient stock for ${item.title}`, 409);
-      }
-
-      const cart = await Cart.findOne({ user: user._id }).session(session) as unknown as (CartDocument & { items: CartEntry[] }) | null;
-      if (cart) {
-        for (const purchased of orderItems) {
-          const item = cart.items.find((entry: CartEntry) =>
-            entry.product.toString() === purchased.productId.toString()
-            && entry.variant?.toString() === purchased.variantId.toString(),
-          );
-          if (!item) continue;
-          item.quantity -= purchased.quantity;
-          if (item.quantity <= 0) {
-            cart.items = cart.items.filter((entry) => entry._id?.toString() !== item._id?.toString());
-          }
-        }
-        await cart.save({ session });
-      }
-
-      payment.status = "paid";
-      payment.razorpay.paymentId = paymentId;
-      payment.razorpay.signature = signature;
-      await payment.save({ session });
-    });
-  } finally {
-    await session.endSession();
-  }
-
-  return Response.json({
-    message: alreadyProcessed ? "Payment was already processed" : "Payment verified and inventory updated",
-    success: true,
+  const result = await paymentService.verifyPayment(user._id, {
+    razorpay_order_id: orderId,
+    razorpay_payment_id: paymentId,
+    razorpay_signature: signature,
   });
+
+  return standardResponse(
+    {},
+    {
+      message: result.message,
+    },
+  );
 }

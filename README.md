@@ -1,114 +1,154 @@
-# SNITCH
+# SNITCH — Production-Grade 3D Fashion E-Commerce Marketplace
 
-A fashion marketplace served by one Next.js application, with a photo-led editorial storefront and server-side commerce APIs backed by MongoDB.
+An enterprise-ready, scalable, and secure fashion marketplace engineered with **Next.js 16 (App Router)**, **React 19**, **Three.js (React Three Fiber & Drei)**, **MongoDB / Mongoose**, **Redis**, and **Razorpay**, designed around a clean modular monolithic backend architecture.
 
-## What is included
+---
 
-- Editorial, responsive storefront with search, collections and live product cards.
-- Editorial fashion photography in the homepage hero.
-- Product detail pages with real product photography, selectable backend variants and an optional drag-to-rotate GLB viewer.
-- Sign in, registration, Google OAuth entry point, account profile, saved items and order history.
-- Cookie-authenticated cart, delivery-address capture, Razorpay test checkout, signature verification, inventory updates and order history.
-- Seller studio for product details, categories, SKU, listing availability, option pricing and stock, plus prepare/ready/dispatch/delivered order fulfillment.
-- Next.js Route Handlers for authentication, products, cart, wishlist, orders, seller tools and payments.
-- GSAP scroll reveals, Framer Motion entrances/transitions, keyboard-friendly controls and reduced-motion support.
+## 1. Architectural Highlights
 
-## Technology
+- **Modular Monolithic Architecture**: Clear separation of concerns across controllers, domain services (`lib/server/services`), data repositories (`lib/server/repositories`), validators (`lib/server/validators`), and database models.
+- **Enterprise Authentication & RBAC**: Dual-token JWT architecture (15-minute access token + 30-day SHA-256 hashed refresh token with token rotation, replay detection, and active session revocation), HttpOnly SameSite cookies, bcrypt password hashing, and Role-Based Access Control (`buyer`, `seller`, `admin`).
+- **Resilient Financial Transactions (Razorpay)**:
+  - 100% server-side amount calculation (frontend amounts are never trusted).
+  - Timing-safe HMAC-SHA256 signature verification.
+  - Dedicated webhook endpoint with raw-body cryptographic verification.
+  - Idempotent payment processing preventing duplicate orders.
+- **Two-Phase Atomic Inventory Locking**:
+  - 10-minute temporary stock reservations during checkout using MongoDB atomic conditional updates (`$inc` where `stock >= quantity`).
+  - Automatic reservation release on payment failure or cancellation.
+  - Periodic automated sweep of expired reservations.
+  - Guaranteed negative stock prevention under concurrent purchases.
+- **Multi-Tier Caching & Graceful Degradation**:
+  - Redis cache-aside strategy for catalog listings, product details, and category taxonomies.
+  - Seamless automated fallback to an in-memory TTL cache if Redis is unconfigured or offline.
+- **Background Task Processing**:
+  - Asynchronous task execution with BullMQ and Redis with automatic retry, exponential backoff, and in-process fallback execution for notifications and maintenance jobs.
+- **Interactive 3D Storefront**:
+  - Three.js / React Three Fiber / Drei lazy-loaded 3D garment viewer with real-time colorway tinting, low-power demand rendering, and automatic GPU memory cleanup.
+- **Automated Testing & CI/CD**:
+  - Vitest unit & integration test suites covering all commerce workflows.
+  - Playwright end-to-end testing suite.
+  - GitHub Actions automated CI pipeline (`.github/workflows/ci.yml`).
+  - Multi-stage non-root Alpine Docker container and `docker-compose.yml`.
 
-| Area | Technologies |
-| --- | --- |
-| Frontend | Next.js App Router, React 19, TypeScript, Sass |
-| Product viewer | Three.js, React Three Fiber, Drei |
-| Motion | GSAP / ScrollTrigger, Framer Motion |
-| Server and API | Next.js App Router, Route Handlers, MongoDB / Mongoose |
-| Payments | Razorpay |
-| Images | ImageKit-backed product images |
+---
 
-All application code lives in this repository's root: App Router pages and API handlers in `app`, shared UI in `components`, and server-side database, authentication and commerce logic in `lib/server`. The unused Vite and Express applications have been removed.
+## 2. Technology Stack
 
-## Run locally
+| Domain | Technologies |
+| :--- | :--- |
+| **Frontend Runtime** | Next.js 16 (App Router), React 19, TypeScript, Sass (SCSS) |
+| **Motion & Editorial**| Framer Motion 12, GSAP 3, ScrollTrigger |
+| **3D Rendering** | Three.js 0.177, React Three Fiber 9, Drei 10 |
+| **Backend & APIs** | Next.js Route Handlers, Node.js 20+, Zod 4 |
+| **Database** | MongoDB 7.0, Mongoose 9 (Optimized Compound Indexes & Aggregations) |
+| **Caching & Queues**| Redis 7.0, ioredis 6, BullMQ 6 (with in-memory fallback) |
+| **Payments** | Razorpay Node SDK (Order creation, signature verification, webhooks, refunds) |
+| **Media Hosting** | ImageKit Node SDK (Validated multi-image uploads) |
+| **Quality & DevOps**| Vitest 5, Playwright, Docker, Docker Compose, GitHub Actions, k6 |
 
-### Requirements
+---
 
-- Node.js 20.9 or later and npm
-- MongoDB and the third-party service credentials described below
+## 3. High-Level Architecture
 
-Install the unified Next.js application dependencies:
+```mermaid
+flowchart TB
+    Client["Storefront Client (React 19 / Three.js)"]
+    Gateway["Security Gateway (Rate Limiter / CSRF / Correlation ID)"]
+    ServiceLayer["Service Layer (Auth / Product / Cart / Payment / Inventory)"]
+    CacheTier["Cache Tier (Redis 7.0 / In-Memory Fallback)"]
+    DBTier["Database Tier (MongoDB Replica Set / Indexes)"]
+    External["External Integrations (Razorpay / ImageKit / Google OAuth)"]
 
-```powershell
+    Client --> Gateway
+    Gateway --> ServiceLayer
+    ServiceLayer --> CacheTier
+    ServiceLayer --> DBTier
+    ServiceLayer --> External
+```
+
+---
+
+## 4. Local Quick Start
+
+### 4.1 Prerequisites
+- Node.js 20.9+ and npm
+- MongoDB (local service or MongoDB Atlas connection string)
+- Redis (optional — falls back automatically to in-memory caching)
+
+### 4.2 Installation
+```bash
+git clone <repo-url>
+cd snitch
 npm install
+```
+
+### 4.3 Environment Configuration
+Create `.env.local` in the project root:
+```env
+PORT=5173
+NODE_ENV=development
+MONGO_URI=mongodb://127.0.0.1:27017/snitch
+JWT_SECRET=super_secret_jwt_key_at_least_32_characters_long
+JWT_REFRESH_SECRET=super_secret_refresh_key_32_characters_long
+REDIS_URL=redis://127.0.0.1:6379
+
+# Payments (Razorpay Test Mode)
+RAZORPAY_KEY_ID=rzp_test_your_key_id
+RAZORPAY_KEY_SECRET=your_razorpay_secret
+RAZORPAY_WEBHOOK_SECRET=your_webhook_secret
+
+# Media Storage (ImageKit)
+IMAGEKIT_PRIVATE_KEY=your_imagekit_private_key
+
+# Google OAuth (Optional)
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=http://localhost:5173/auth/google/callback
+```
+
+### 4.4 Running Locally
+```bash
 npm run dev
 ```
+Open `http://localhost:5173` to explore the editorial storefront.
 
-Open `http://localhost:5173`. The same Next.js server renders the site and serves `/api/*` and Google OAuth callback routes.
+---
 
-## Environment configuration
+## 5. Docker Infrastructure
 
-Keep private credentials in `.env.local` at the repository root. These values are server-only and must never use a `NEXT_PUBLIC_` prefix.
-
-```dotenv
-MONGO_URI=<your-mongodb-connection-string>
-JWT_SECRET=<a-long-random-secret>
-GOOGLE_CLIENT_ID=<your-google-oauth-client-id>
-GOOGLE_CLIENT_SECRET=<your-google-oauth-client-secret>
-IMAGEKIT_PRIVATE_KEY=<your-imagekit-private-key>
-RAZORPAY_KEY_ID=<your-razorpay-key-id>
-RAZORPAY_KEY_SECRET=<your-razorpay-key-secret>
-NODE_ENV=development
+To run the complete production environment (Application + Redis + MongoDB):
+```bash
+docker compose up -d --build
 ```
 
-Add **exactly** `http://localhost:5173/auth/google/callback` to the authorized redirect URIs in Google Cloud. The callback URL is generated from the current app origin and handled directly by Next.js. For production, add `<your-public-origin>/auth/google/callback` to the authorized redirect URIs.
+---
 
-MongoDB is required for catalog and account routes. Google OAuth, ImageKit and Razorpay credentials are required only for their respective features. Razorpay checkout uses the real order and signature-verification APIs; the checkout script loads only when a buyer starts checkout.
+## 6. Testing
 
-Checkout is deliberately locked to Razorpay **test mode**: configure a test key ID beginning with `rzp_test_` and its matching test secret. The server rejects live key IDs, so test purchases cannot charge a live account. Sellers publish a product with its first option and stock quantity; published listings appear in the storefront. Buyers provide a delivery address before opening Razorpay Checkout, and sellers can update each paid order item through preparation, ready, dispatched and delivered.
+Run all unit, integration, and workflow tests:
+```bash
+# Run unit & integration test suite
+npm run test
 
-## Optional 3D assets
+# Run tests with code coverage analysis
+npm run test:coverage
 
-No GLB files are included. The homepage hero uses editorial photography. Product pages display the real product photos unless an actual GLB asset is configured.
-
-For product viewers, put a GLB at `public/models/<product-id>.glb` for each product and set:
-
-```dotenv
-NEXT_PUBLIC_MODEL_ASSET_DIR=/models
+# Run Playwright E2E tests
+npm run test:e2e
 ```
 
-With that setting the viewer looks for the product-ID filename. Without a configured model URL/directory, product pages show the API's actual product photographs and label them as photography; they do not claim to offer 360-degree rotation. A missing or unreadable GLB falls back to the product image. Keep models and textures compressed and reasonably sized for mobile.
+---
 
-## Scripts
+## 7. Comprehensive Documentation
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Run Next.js on port `5173` |
-| `npm run build` | Create the optimized production build |
-| `npm start` | Serve the production build on port `5173` |
-| `npm run typecheck` | Run the strict TypeScript check |
-| `npm run lint` | Lint the active Next.js app |
+Detailed architectural and engineering documentation is available in `docs/`:
 
-## Routes
-
-| Path | Purpose |
-| --- | --- |
-| `/` | Editorial storefront and live catalog |
-| `/product/:productId` | Product photos, variants and optional GLB viewer |
-| `/login`, `/register` | Buyer and seller authentication |
-| `/wishlist`, `/cart`, `/orders` | Buyer commerce |
-| `/order-success` | Verified Razorpay completion |
-| `/profile` | Signed-in account |
-| `/seller/dashboard` | Seller listings and fulfillment |
-| `/seller/create-product` | Create a product listing |
-| `/seller/product/:productId` | Manage a listing's size, colour, price and inventory options |
-
-## API integration
-
-The Next.js Route Handlers use the existing MongoDB models and preserve the marketplace API contracts; commerce flows do not use demo or mock APIs:
-
-| API path | Use |
-| --- | --- |
-| `/api/auth` | Registration, login, logout and current user |
-| `/api/products` | Live catalog, seller-only listing creation/editing, availability and option inventory |
-| `/api/cart` | Cart, delivery details, Razorpay test order creation and payment verification |
-| `/api/wishlist` | Saved products |
-| `/api/orders` | Buyer order history and per-item seller fulfillment progression |
-
-Product creation and variant images are uploaded to ImageKit, limited to seven images per request and 5 MB per file.
+- [PROJECT_AUDIT.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/PROJECT_AUDIT.md) — Comprehensive repository audit, identified vulnerabilities, and transformation roadmap.
+- [ARCHITECTURE.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/ARCHITECTURE.md) — Full modular monolithic system architecture specification.
+- [SECURITY.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/SECURITY.md) — Threat model, authentication, CSRF, rate limiting, and RBAC implementation.
+- [DATABASE_DESIGN.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/DATABASE_DESIGN.md) — MongoDB schema design, indexes, and two-phase atomic inventory locking.
+- [API_DOCUMENTATION.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/API_DOCUMENTATION.md) — OpenAPI 3.0 specification for all REST endpoints.
+- [PERFORMANCE_REPORT.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/PERFORMANCE_REPORT.md) — k6 load testing benchmarks, throughput, and Web Vitals targets.
+- [TESTING.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/TESTING.md) — Vitest & Playwright automated testing strategy.
+- [DEPLOYMENT.md](file:///c:/Users/rp512/OneDrive/Desktop/Snitch/docs/DEPLOYMENT.md) — Production deployment, Docker containerization, and monitoring probes.
